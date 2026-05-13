@@ -1,12 +1,11 @@
-'''
+"""
 Created on 1 Dec 2021
 
 @author: turch
-'''
+"""
 from deep_translator import GoogleTranslator
 import pandas as pd
 import fnmatch as fn
-import os
 from pathlib import Path
 import traceback
 import logging
