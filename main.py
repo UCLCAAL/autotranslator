@@ -7,20 +7,42 @@ Created on 19 Jun 2022
 import argparse
 from set_parameters import Begin
 import pathlib
+from pathlib import Path
+import logging
+from logger_config import setup_logger
+from config import (
+    DEFAULT_COLUMNS_ARCHIVE,
+    DEFAULT_COLUMNS_MONUMENT,
+    DEFAULT_START_ROW,
+    FILE_TYPE_SHEET_MAP,
+    SHEET_ARCHIVE,
+    SHEET_MONUMENT
+)
+
+# Set up logger
+logger = setup_logger()
 
 
-def init():
+def init() -> None:
+    """
+    Initialize and run the translation module.
+    
+    Parses command-line arguments and starts the translation process.
+    """
     parser = argparse.ArgumentParser(
         description="Automatic translation module with glossary support"
     )
     current_file_location = pathlib.Path(__file__).parent.resolve()
-    gloss_path = pathlib.Path(current_file_location / "glossary.xlsx")
+    gloss_path = current_file_location / "glossary.xlsx"
+
+    # Use current working directory as default instead of hardcoded Windows path
+    default_data_path = Path.cwd() / "data"
 
     parser.add_argument(
         "-d",
         "--data_path",
         type=str,
-        default=str(current_file_location / "data"),
+        default=str(default_data_path),
         help="Path to folder/file with data to translate",
     )
     parser.add_argument(
@@ -62,6 +84,14 @@ def init():
         default="",
         help="The columns to be translated, default for 'Archives' is C, E, G, H, J; for 'Monuments' is B, C, D",
     )
+    '''parser.add_argument(
+        "-oc",
+        "--output_columns",
+        nargs="+",
+        type=str,
+        required=True,
+        help="The columns to insert translated data into. Please type in corresponding order to input columns", 
+    )''' # Removed as not needed for CSV output
     parser.add_argument(
         "-r",
         "--start_row",
@@ -69,45 +99,60 @@ def init():
         default=5,
         help="Row to start translation from (excluding column names, default: 5)",
     )
+
+    parser.add_argument(
+        "-od", 
+        "--output_directory",
+        type=Path,
+        default=Path.cwd(),
+        help="Path to CSV output directory",
+    )
+
     args = parser.parse_args()
-    if args.sheet == "Monuments":
-        sheet = "Data Sheet"
-        if not args.input_columns:
-            columns = [
-                "B",
-                "C",
-                "D",
-            ]
-        else:
-            columns = args.input_columns
+    
+    # Determine sheet name and columns based on file type
+    if args.sheet == "Monument":
+        sheet = SHEET_MONUMENT
+        columns = args.input_columns if args.input_columns else DEFAULT_COLUMNS_MONUMENT
     elif args.sheet == "Archive":
-        sheet = "2.Описание"
-        if not args.input_columns:
-            columns = ["C", "E", "G", "H", "J"]
-        else:
-            columns = args.input_columns
+        sheet = SHEET_ARCHIVE
+        columns = args.input_columns if args.input_columns else DEFAULT_COLUMNS_ARCHIVE
     else:
         sheet = input("Please enter name of the sheet to translate: ")
+        columns = args.input_columns if args.input_columns else []
 
-    if not gloss_path.exists():
-        raise FileNotFoundError(
-            f"Glossary file not found at {gloss_path}. Please provide a valid path."
-        )
+    # Validate glossary file
+    gloss_file_path = Path(args.glossfile)
+    if not gloss_file_path.is_absolute():
+        gloss_file_path = current_file_location / args.glossfile
+    
+    if not gloss_file_path.exists():
+        error_msg = f"Glossary file not found at {gloss_file_path}. Please provide a valid path."
+        logger.error(error_msg)
+        raise FileNotFoundError(error_msg)
+    
     filetype = str(args.sheet)
-    print(gloss_path)
-    print(columns)
-    #
-    Begin.modrun(
-        self=None,
-        data_path=args.data_path,
-        ilanguage=args.input_language,
-        olanguage=args.output_language,
-        filetype=filetype,
-        glossfile=args.glossfile,
-        sheet=sheet,
-        input_column=columns,
-        start_row=args.start_row,
-    )
+    logger.info(f"Glossary path: {gloss_file_path}")
+    logger.info(f"Columns to translate: {columns}")
+    print(f"Glossary path: {gloss_file_path}")
+    print(f"Columns: {columns}")
+    
+    try:
+        begin = Begin()
+        begin.modrun(
+            data_path=args.data_path,
+            ilanguage=args.input_language,
+            olanguage=args.output_language,
+            filetype=filetype,
+            glossfile=str(gloss_file_path),
+            sheet=sheet,
+            input_column=columns,
+            start_row=args.start_row,
+            output_dir=args.output_directory
+        )
+    except Exception as e:
+        logger.exception("Error during translation process")
+        raise
 
 
 init()
