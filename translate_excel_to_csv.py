@@ -292,7 +292,7 @@ class TranslMethods:
                                 ilanguage,
                                 olanguage
                             )
-                        transl_data[col] = transltxt
+                            transl_data[col] = transltxt
                         except Exception as e:
                             logger.error(f"Translation failed for column {col}: {str(e)}")
                             transl_data[col] = transl_text  # Use original on failure
@@ -340,8 +340,15 @@ class TranslMethods:
             # Create final data structure
             # Note: This structure is specific to the current use case
             # May need to be made configurable in the future
+            title_parts = [
+                combined_data.get('CAAL_ID', ''),
+                combined_data.get('Name', ''),
+                combined_data.get('Title', '')
+            ]
+            title = ' / '.join(str(part) for part in title_parts if part)
+            
             final_data = {
-                'Title': f"{combined_data.get('CAAL_ID', '')} / {combined_data.get('Name', '')}",
+                'Title': title,
                 'Description': combined_data.get('Description', ''),
                 'Type': f"{combined_data.get('Type of material', '')}. {combined_data.get('Quantity', '')}"
             }
