@@ -332,7 +332,7 @@ class TranslMethods:
             for col, item in data_dict.items():
                 if col in COMBINE_COLUMNS and col in untrans:
                     original = untrans[col]
-                    combined = f"{original} / {item}"
+                    combined = f"{original} - {item}"
                     combined_data[col] = combined
                 else:
                     combined_data[col] = item
@@ -345,7 +345,7 @@ class TranslMethods:
                 combined_data.get('Name', ''),
                 combined_data.get('Title', '')
             ]
-            title = ' / '.join(str(part) for part in title_parts if part)
+            title = ' - '.join(str(part) for part in title_parts if part)
             
             final_data = {
                 'Title': title,
