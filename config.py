@@ -32,9 +32,21 @@ CSV_ENCODING = 'utf-8-sig'
 # Column name mappings for translation
 COLUMN_NAME_MAPPINGS: Dict[str, str] = {
     'name': 'Name',
+    'title': 'Title',
     'quantity': 'Quantity',
     'caal': 'CAAL_ID',
-    'passport': 'Description'
+    'passport': 'Description',
+    'название': 'Title'  # Fallback if the header is not translated to English
+}
+
+# Maps header keywords to CSV output field roles
+# Used to identify which columns go into Title, Description, Type
+CSV_OUTPUT_FIELD_MAP: Dict[str, str] = {
+    'Name': 'title_name',           # Column C - Name
+    'Title': 'title_title',         # Column E - Title (Название)
+    'Description': 'description',   # Column H - Description
+    'Type of material': 'type',     # Column G - Type
+    'Quantity': 'type'              # Column J - Quantity
 }
 
 # Supported languages
