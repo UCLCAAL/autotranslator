@@ -15,7 +15,9 @@ from config import (
     COMBINE_COLUMNS,
     CSV_DELIMITER,
     CSV_ENCODING,
-    COLUMN_NAME_MAPPINGS
+    COLUMN_NAME_MAPPINGS,
+    LOCATION_COLUMN_ARCHIVE,
+    CORE_DRIVE
 )
 from utils import ensure_output_directory
 
@@ -64,6 +66,8 @@ class TranslMethods:
         self.russgloss: Optional[Dict[str, Any]] = None
         self.translator_instance: Optional[GoogleTranslator] = None
         self.translation_cache = TranslationCache()
+        self.filetype: Optional[str] = None
+        self.location_field: str = '__archive_location_raw__'
         
     def _get_translator(self, source_lang: str, target_lang: str) -> GoogleTranslator:
         """
@@ -144,7 +148,8 @@ class TranslMethods:
         input_sheet: str,
         input_column: List[str],
         start_row: int,
-        max_row: int
+        max_row: int,
+        filetype: str
     ) -> None:
         """
         Load data from Excel file.
@@ -155,10 +160,15 @@ class TranslMethods:
             input_column: List of column letters to read
             start_row: Row number to start reading from (1-indexed)
             max_row: Maximum row number
+            filetype: Type of file being processed
         """
         logger.info(f"Loading data from {filename}, sheet: {input_sheet}")
         
-        col = ','.join(input_column)  # joins column names as a string with , - needed to set the columns for the dataframe
+        all_columns = list(input_column)
+        if filetype == 'Archive' and LOCATION_COLUMN_ARCHIVE not in all_columns:
+            all_columns.append(LOCATION_COLUMN_ARCHIVE)
+
+        col = ','.join(all_columns)  # joins column names as a string with , - needed to set the columns for the dataframe
         rows = int(max_row - start_row)  # number of rows is max_row minus start row
         self.rows = rows
         
@@ -170,7 +180,7 @@ class TranslMethods:
                 filename,
                 input_sheet,
                 header=None,
-                names=input_column,
+                names=all_columns,
                 usecols=col,
                 skiprows=skipline,
                 nrows=rows
@@ -205,11 +215,13 @@ class TranslMethods:
             logger.debug(f"Column mappings: {linked_cols}")
             
             # Convert to list of dictionaries
-            untrans_to_dict = data[input_column].to_dict(orient='records')
-            untranslated = [
-                {linked_cols.get(k, k): v for k, v in entry.items()}
-                for entry in untrans_to_dict
-            ]
+            untrans_to_dict = data[all_columns].to_dict(orient='records')
+            untranslated = []
+            for entry in untrans_to_dict:
+                converted_entry = {linked_cols.get(k, k): v for k, v in entry.items()}
+                if filetype == 'Archive':
+                    converted_entry[self.location_field] = entry.get(LOCATION_COLUMN_ARCHIVE, '')
+                untranslated.append(converted_entry)
             self.untranslated = untranslated
             
             logger.info("Data extracted successfully")
@@ -282,8 +294,8 @@ class TranslMethods:
             for data_dict in untranslated:
                 transl_data = {}
                 for col, item in data_dict.items():
-                    if col.lower() == 'caal_id':
-                        transl_data[col] = item  # Don't translate CAAL ID
+                    if col.lower() == 'caal_id' or col == self.location_field:
+                        transl_data[col] = item  # Don't translate CAAL ID or archive location metadata
                     else:
                         transl_text = str(item)
                         try:
@@ -352,6 +364,16 @@ class TranslMethods:
                 'Description': combined_data.get('Description', ''),
                 'Type': f"{combined_data.get('Type of material', '')}. {combined_data.get('Quantity', '')}"
             }
+            if self.filetype == 'Archive':
+                raw_location = combined_data.get(self.location_field, '')
+                if raw_location:
+                    location_suffix = str(raw_location).strip().strip('/')
+                    if location_suffix:
+                        if CORE_DRIVE.endswith('/'):
+                            location_full = f"{CORE_DRIVE.rstrip('/')}/{location_suffix}"
+                        else:
+                            location_full = f"{CORE_DRIVE}/{location_suffix}"
+                        final_data['Location'] = f"Location: {location_full}"
             
             list_combined.append(final_data)
         
@@ -442,7 +464,8 @@ class TranslateRun:
             glossfile: Path to glossary file
             output_dir: Output directory for CSV files
         """
-        self.transl.load_data(filename, input_sheet, input_column, start_row, max_row)
+        self.transl.filetype = filetype
+        self.transl.load_data(filename, input_sheet, input_column, start_row, max_row, filetype)
         # data_check is currently bypassed for Archive files
         # self.transl.data_check(ilanguage, olanguage, filetype, glossfile)
         self.transl.translator(ilanguage, olanguage, filetype)
