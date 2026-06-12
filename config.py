@@ -25,6 +25,10 @@ ROW_COUNT_COLUMN_MONUMENT = 'G'
 # Columns to combine in output (original + translated)
 COMBINE_COLUMNS = ['Name', 'Description']
 
+# Archive-specific location column and drive prefix
+LOCATION_COLUMN_ARCHIVE = 'AC'
+CORE_DRIVE = '/rdss/rd00/ritd-ag-project-rd00rp-gjora21/'
+
 # Output CSV configuration
 CSV_DELIMITER = ';'
 CSV_ENCODING = 'utf-8-sig'
