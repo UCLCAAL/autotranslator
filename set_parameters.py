@@ -114,6 +114,7 @@ class LoadFolders:
         input_column: List[str],
         start_row: int,
         output_dir: Path,
+        api_keys: List[str],
     ) -> None:
         """
         Run translation workflow for discovered files.
@@ -218,6 +219,7 @@ class LoadFolders:
                     input_column,
                     start_row,
                     output_dir,
+                    api_keys,
                 )
 
     def removefiles(
@@ -233,6 +235,7 @@ class LoadFolders:
         input_column: List[str],
         start_row: int,
         output_dir: Path,
+        api_keys: List[str],
     ) -> None:
         """
         Allow user to remove files from the translation list by index.
@@ -252,6 +255,7 @@ class LoadFolders:
             input_column: List of column letters to translate
             start_row: Starting row number
             output_dir: Output directory for CSV files
+            api_keys: List of API keys
         """
         if str(remy) == "N":  # if No files are to be removed
             self.xl_proceed(
@@ -264,6 +268,7 @@ class LoadFolders:
                 glossfile,
                 data_path,
                 output_dir,
+                api_keys,
             )
         elif str(remy) == "":  # if it's a blank (clicked OK by accident)
             self.runtransl(
@@ -276,6 +281,7 @@ class LoadFolders:
                 input_column,
                 start_row,
                 output_dir,
+                api_keys,
             )
         else:  # otherwise
             if "," in str(remy):  # if comma is in the string
@@ -298,6 +304,7 @@ class LoadFolders:
                     input_column,
                     start_row,
                     output_dir,
+                    api_keys,
                 )
             elif str(remy).isdigit():
                 idx = int(remy) - 1
@@ -314,6 +321,7 @@ class LoadFolders:
                     input_column,
                     start_row,
                     output_dir,
+                    api_keys,
                 )
             else:
                 error_msg = "Invalid Input"
@@ -329,6 +337,7 @@ class LoadFolders:
                     input_column,
                     start_row,
                     output_dir,
+                    api_keys,
                 )
 
         """
@@ -356,6 +365,7 @@ class LoadFolders:
         glossfile: str,
         data_path: str,
         output_dir: Path,
+        api_keys: List[str],
     ) -> None:
         """
         Allow user to edit input parameters interactively.
@@ -370,6 +380,7 @@ class LoadFolders:
             glossfile: Path to glossary file
             data_path: Path to data directory
             output_dir: Output directory for CSV files
+            api_keys: List of API keys
         """
         from config import SHEET_MONUMENT, SHEET_ARCHIVE
 
@@ -416,6 +427,7 @@ class LoadFolders:
             glossfile,
             data_path,
             output_dir,
+            api_keys,
         )
 
     def xl_proceed(
@@ -429,6 +441,7 @@ class LoadFolders:
         glossfile: str,
         data_path: str,
         output_dir: Path,
+        api_keys: List[str],
     ) -> None:
         """
         Proceed with Excel file translation after user confirmation.
@@ -443,6 +456,7 @@ class LoadFolders:
             glossfile: Path to glossary file
             data_path: Path to data directory
             output_dir: Output directory for CSV files
+            api_keys: List of API keys
         """
         transl = TranslateRun()
 
@@ -525,6 +539,7 @@ class LoadFolders:
                         filetype,
                         glossfile,
                         output_dir,
+                        api_keys,
                     )
                     successful_files.append(file)
                     print("  ✓ Successfully translated")
@@ -586,6 +601,7 @@ class LoadFolders:
                 glossfile,
                 data_path,
                 output_dir,
+                api_keys
             )
 
 
@@ -605,6 +621,7 @@ class Begin:
         input_column: List[str],
         start_row: int,
         output_dir: Path,
+        api_keys: List[str],
     ) -> None:
         """
         Run the complete translation workflow.
@@ -619,6 +636,7 @@ class Begin:
             input_column: List of column letters to translate
             start_row: Starting row number
             output_dir: Output directory for CSV files
+            api_keys: List of DeepL API keys
         """
         load = LoadFolders()
         load.openfolder(data_path, filetype)
@@ -632,4 +650,5 @@ class Begin:
             input_column,
             start_row,
             output_dir,
+            api_keys,
         )

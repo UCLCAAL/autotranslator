@@ -3,7 +3,7 @@ Created on 1 Dec 2021
 
 @author: turch
 """
-from deep_translator import GoogleTranslator
+from deep_translator import DeeplTranslator
 import pandas as pd
 import fnmatch as fn
 from pathlib import Path
@@ -53,7 +53,7 @@ class TranslMethods:
     Handles data loading, translation, and CSV export with glossary support.
     """
     
-    def __init__(self):
+    def __init__(self, api_keys: Optional[List[str]] = None):
         """Initialize TranslMethods with instance-level lists to avoid shared state."""
         self.checked_untrans: List[Dict[str, Any]] = []
         self.translated: List[Dict[str, Any]] = []
@@ -64,25 +64,53 @@ class TranslMethods:
         self.linked_cols: Dict[str, str] = {}
         self.transl_columns: List[str] = []
         self.russgloss: Optional[Dict[str, Any]] = None
-        self.translator_instance: Optional[GoogleTranslator] = None
+        self.api_keys: List[str] = api_keys or []
+        self.current_key_index: int = 0
+        self.translator_instance: Optional[DeeplTranslator] = None
+        self._active_lang_pair: Optional[Tuple[str, str]] = None
         self.translation_cache = TranslationCache()
         self.filetype: Optional[str] = None
         self.location_field: str = '__archive_location_raw__'
+
+    def set_api_keys(self, api_keys: List[str]) -> None:
+        """Set or update the list of DeepL API keys."""
+        if not api_keys:
+            raise ValueError("api_keys list cannot be empty.")
+        if api_keys != self.api_keys:
+            self.api_keys = api_keys
+            self.current_key_index = 0
+            self.translator_instance = None
         
-    def _get_translator(self, source_lang: str, target_lang: str) -> GoogleTranslator:
+    def _get_translator(self, source_lang: str, target_lang: str) -> DeeplTranslator:
         """
-        Get or create translator instance for reuse.
+        Get or create DeepL translator instance for the current active API key.
         
         Args:
             source_lang: Source language code
             target_lang: Target language code
             
         Returns:
-            GoogleTranslator instance
+            DeeplTranslator instance
         """
-        if self.translator_instance is None:
-            self.translator_instance = GoogleTranslator(source=source_lang, target=target_lang)
-            logger.debug(f"Created translator instance: {source_lang} -> {target_lang}")
+        if not self.api_keys:
+            raise ValueError("No DeepL API keys provided. Pass api_keys before translating.")
+
+        if self.current_key_index >= len(self.api_keys):
+            raise RuntimeError("All DeepL API keys have been exhausted or failed.")
+
+        if self.translator_instance is None or self._active_lang_pair != (source_lang, target_lang):
+            current_key = self.api_keys[self.current_key_index]
+            self.translator_instance = DeeplTranslator(
+                api_key=current_key,
+                source=source_lang,
+                target=target_lang,
+                use_free_api=current_key.endswith(":fx")
+            )
+            self._active_lang_pair = (source_lang, target_lang)
+            logger.debug(
+                f"Created DeepL translator instance ({source_lang} -> {target_lang}) "
+                f"using key #{self.current_key_index + 1}"
+            )
         return self.translator_instance
         
     def _translate_with_retry(
@@ -90,24 +118,22 @@ class TranslMethods:
         text: str,
         source_lang: str,
         target_lang: str,
-        max_retries: int = 3,
         retry_delay: float = 1.0
     ) -> str:
         """
-        Translate text with retry logic for handling API rate limits and timeouts.
+        Translate text with automatic API key rotation on failure/quota exhaustion.
         
         Args:
             text: Text to translate
             source_lang: Source language code
             target_lang: Target language code
-            max_retries: Maximum number of retry attempts
-            retry_delay: Delay between retries in seconds
+            retry_delay: Brief pause before switching keys
             
         Returns:
             Translated text
             
         Raises:
-            Exception: If translation fails after all retries
+            Exception: If all API keys fail
         """
         # Check cache first
         cached = self.translation_cache.get(text, source_lang, target_lang)
@@ -118,29 +144,27 @@ class TranslMethods:
         # Skip translation for empty strings
         if not text or str(text).strip() == '':
             return str(text)
-        
-        translator = self._get_translator(source_lang, target_lang)
-        
-        for attempt in range(max_retries):
+
+        while self.current_key_index < len(self.api_keys):
+            translator = self._get_translator(source_lang, target_lang)
             try:
                 translation = translator.translate(str(text))
-                # Cache the result
                 self.translation_cache.set(text, source_lang, target_lang, translation)
                 return translation
             except Exception as e:
-                if attempt < max_retries - 1:
-                    logger.warning(
-                        f"Translation attempt {attempt + 1} failed: {str(e)}. "
-                        f"Retrying in {retry_delay} seconds..."
-                    )
-                    time.sleep(retry_delay * (attempt + 1))  # Exponential backoff
-                else:
-                    error_msg = f"Translation failed after {max_retries} attempts: {str(e)}"
-                    logger.error(error_msg)
-                    raise Exception(error_msg) from e
-        
-        # Should never reach here, but just in case
-        raise Exception("Translation failed unexpectedly")
+                logger.warning(
+                    f"DeepL key #{self.current_key_index + 1} failed: {str(e)}. "
+                    f"Rotating to next key..."
+                )
+                print(f"Key #{self.current_key_index + 1} failed ({e}). Switching to next key...")
+                self.current_key_index += 1
+                self.translator_instance = None
+                if self.current_key_index < len(self.api_keys):
+                    time.sleep(retry_delay)
+
+        error_msg = "Translation failed: all DeepL API keys exhausted or failed."
+        logger.error(error_msg)
+        raise RuntimeError(error_msg)
         
     def load_data(
         self,
@@ -149,7 +173,9 @@ class TranslMethods:
         input_column: List[str],
         start_row: int,
         max_row: int,
-        filetype: str
+        filetype: str,
+        ilanguage: str = 'ru',
+        olanguage: str = 'en'
     ) -> None:
         """
         Load data from Excel file.
@@ -161,6 +187,8 @@ class TranslMethods:
             start_row: Row number to start reading from (1-indexed)
             max_row: Maximum row number
             filetype: Type of file being processed
+            ilanguage: Input language code for header translation
+            olanguage: Output language code for header translation
         """
         logger.info(f"Loading data from {filename}, sheet: {input_sheet}")
         
@@ -168,13 +196,13 @@ class TranslMethods:
         if filetype == 'Archive' and LOCATION_COLUMN_ARCHIVE not in all_columns:
             all_columns.append(LOCATION_COLUMN_ARCHIVE)
 
-        col = ','.join(all_columns)  # joins column names as a string with , - needed to set the columns for the dataframe
-        rows = int(max_row - start_row)  # number of rows is max_row minus start row
+        col = ','.join(all_columns)
+        rows = int(max_row - start_row)
         self.rows = rows
         
         logger.info(f"Data length: {rows} rows. Starting row: {start_row}")
         
-        skipline = int(start_row) - 1  # pandas uses 0-index, so skip lines before start_row
+        skipline = int(start_row) - 1
         try:
             data = pd.read_excel(
                 filename,
@@ -186,19 +214,17 @@ class TranslMethods:
                 nrows=rows
             )
             logger.debug(f"Data read from Excel:\n{data.head()}")
-            data = data.fillna('')  # fill empty cells with empty strings
+            data = data.fillna('')
             
             # Get column names from the spreadsheet
             names = pd.read_excel(filename, input_sheet, header=1, usecols=col, nrows=1)
             headers = list(names.columns)
             transl_columns = []
             
-            # Translate column headers
-            translator = GoogleTranslator(source='ru', target='en')
+            # Translate column headers using the rotating DeepL keys
             for h in headers:
                 try:
-                    transl_h = translator.translate(str(h))
-                    # Map common column names
+                    transl_h = self._translate_with_retry(str(h), ilanguage, olanguage)
                     transl_h_lower = str(transl_h).lower()
                     for key, value in COLUMN_NAME_MAPPINGS.items():
                         if key in transl_h_lower:
@@ -271,16 +297,25 @@ class TranslMethods:
             logger.exception(error_msg)
             raise
     
-    def translator(self, ilanguage: str, olanguage: str, filetype: str) -> None:
+    def translator(
+        self,
+        ilanguage: str,
+        olanguage: str,
+        filetype: str,
+        api_keys: Optional[List[str]] = None
+    ) -> None:
         """
-        Translate untranslated data using Google Translate API.
+        Translate untranslated data using DeepL API with automatic key rotation.
         
         Args:
             ilanguage: Input language code
             olanguage: Output language code
             filetype: Type of file being processed
+            api_keys: Optional list of DeepL API keys (if not already set on instance)
         """
-        # Use untranslated directly for Archive files (bypasses data_check)
+        if api_keys:
+            self.set_api_keys(api_keys)
+
         if filetype == 'Archive':
             untranslated = self.untranslated
         else:
@@ -295,7 +330,7 @@ class TranslMethods:
                 transl_data = {}
                 for col, item in data_dict.items():
                     if col.lower() == 'caal_id' or col == self.location_field:
-                        transl_data[col] = item  # Don't translate CAAL ID or archive location metadata
+                        transl_data[col] = item
                     else:
                         transl_text = str(item)
                         try:
@@ -305,13 +340,16 @@ class TranslMethods:
                                 olanguage
                             )
                             transl_data[col] = transltxt
+                        except RuntimeError:
+                            # Re-raise immediately if all API keys are exhausted
+                            raise
                         except Exception as e:
                             logger.error(f"Translation failed for column {col}: {str(e)}")
-                            transl_data[col] = transl_text  # Use original on failure
+                            transl_data[col] = transl_text
                 
                 self.translated.append(transl_data)
                 n += 1
-                if n % 10 == 0:  # Log every 10 entries
+                if n % 10 == 0:
                     logger.info(f"{n} entries translated")
                     print(f"{n} entries translated")
                     
@@ -324,9 +362,6 @@ class TranslMethods:
     def combinedata(self) -> None:
         """
         Combine untranslated and translated data for output.
-        
-        Creates final data structure with combined original/translated text
-        for specified columns.
         """
         logger.info("Combining translated and original data")
         list_combined = []
@@ -335,7 +370,6 @@ class TranslMethods:
             combined_data = {}
             id_value = data_dict.get('CAAL_ID')
             
-            # Find corresponding untranslated entry
             untrans = next(
                 (d for d in self.untranslated if d.get('CAAL_ID') == id_value),
                 {}
@@ -349,9 +383,6 @@ class TranslMethods:
                 else:
                     combined_data[col] = item
             
-            # Create final data structure
-            # Note: This structure is specific to the current use case
-            # May need to be made configurable in the future
             title_parts = [
                 combined_data.get('CAAL_ID', ''),
                 combined_data.get('Name', ''),
@@ -383,10 +414,6 @@ class TranslMethods:
     def dict_to_csv(self, filename: str, output_dir: Path) -> None:
         """
         Export combined data to CSV file.
-        
-        Args:
-            filename: Source filename (used for output naming)
-            output_dir: Directory to save CSV file
         """
         csv_file = Path(filename).stem + '_translated_data.csv'
         
@@ -397,7 +424,6 @@ class TranslMethods:
         df = pd.DataFrame(self.list_combined)
         logger.debug(f"DataFrame to export:\n{df.head()}")
         
-        # Ensure output directory exists
         output_path = ensure_output_directory(output_dir, create_subdir=False)
         csv_path = output_path / csv_file
         
@@ -416,7 +442,7 @@ class TranslMethods:
             raise
     
     def reset(self) -> None:
-        """Reset all instance variables for next translation batch."""
+        """Reset per-file state while keeping active API key progress."""
         self.untranslated.clear()
         self.checked_untrans.clear()
         self.translated.clear()
@@ -424,6 +450,7 @@ class TranslMethods:
         self.list_combined.clear()
         self.translation_cache.clear()
         self.translator_instance = None
+        self._active_lang_pair = None
         logger.debug("Reset translation state")
 
 
@@ -432,9 +459,9 @@ class TranslateRun:
     Class to run the translation workflow.
     """
     
-    def __init__(self):
+    def __init__(self, api_keys: Optional[List[str]] = None):
         """Initialize TranslateRun with TranslMethods instance."""
-        self.transl = TranslMethods()
+        self.transl = TranslMethods(api_keys=api_keys)
     
     def execute_translation(
         self,
@@ -447,25 +474,26 @@ class TranslateRun:
         olanguage: str,
         filetype: str,
         glossfile: str,
-        output_dir: Path
+        output_dir: Path,
+        api_keys: Optional[List[str]] = None
     ) -> None:
         """
         Execute the complete translation workflow for a single file.
-        
-        Args:
-            filename: Path to Excel file
-            input_sheet: Sheet name to translate
-            input_column: List of column letters to translate
-            start_row: Starting row number
-            max_row: Maximum row number
-            ilanguage: Input language code
-            olanguage: Output language code
-            filetype: Type of file (Archive, Monument, etc.)
-            glossfile: Path to glossary file
-            output_dir: Output directory for CSV files
         """
+        if api_keys:
+            self.transl.set_api_keys(api_keys)
+
         self.transl.filetype = filetype
-        self.transl.load_data(filename, input_sheet, input_column, start_row, max_row, filetype)
+        self.transl.load_data(
+            filename,
+            input_sheet,
+            input_column,
+            start_row,
+            max_row,
+            filetype,
+            ilanguage=ilanguage,
+            olanguage=olanguage
+        )
         # data_check is currently bypassed for Archive files
         # self.transl.data_check(ilanguage, olanguage, filetype, glossfile)
         self.transl.translator(ilanguage, olanguage, filetype)
@@ -483,22 +511,11 @@ class TranslateRun:
         olanguage: str,
         filetype: str,
         glossfile: str,
-        output_dir: Path
+        output_dir: Path,
+        api_keys: Optional[List[str]] = None
     ) -> None:
         """
         Run translation and reset state afterwards.
-        
-        Args:
-            filename: Path to Excel file
-            input_sheet: Sheet name to translate
-            input_column: List of column letters to translate
-            start_row: Starting row number
-            max_row: Maximum row number
-            ilanguage: Input language code
-            olanguage: Output language code
-            filetype: Type of file
-            glossfile: Path to glossary file
-            output_dir: Output directory for CSV files
         """
         logger.info(f"Translating: {filename}\nColumns: {input_column}")
         print(f'Now translating: {filename}\nColumns: {input_column}')
@@ -514,7 +531,7 @@ class TranslateRun:
             olanguage,
             filetype,
             glossfile,
-            output_dir
+            output_dir,
+            api_keys=api_keys
         )
         self.transl.reset()
-        

@@ -10,6 +10,7 @@ import pathlib
 from pathlib import Path
 import logging
 from logger_config import setup_logger
+from encode import load_keys
 from config import (
     DEFAULT_COLUMNS_ARCHIVE,
     DEFAULT_COLUMNS_MONUMENT,
@@ -38,6 +39,12 @@ def init() -> None:
     # Use current working directory as default instead of hardcoded Windows path
     default_data_path = Path.cwd() / "data"
 
+    parser.add_argument(
+        "-p",
+        "--passphrase", 
+        help="Team passphrase to unlock keys.enc", 
+        default=None)
+    
     parser.add_argument(
         "-d",
         "--data_path",
@@ -109,6 +116,9 @@ def init() -> None:
     )
 
     args = parser.parse_args()
+
+    api_keys = load_keys(args.passphrase)
+    print(api_keys)
     
     # Determine sheet name and columns based on file type
     if args.sheet == "Monument":
