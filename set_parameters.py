@@ -189,6 +189,7 @@ class LoadFolders:
                             input_column,
                             start_row,
                             output_dir,
+                            api_keys,
                         )
                         break
 
